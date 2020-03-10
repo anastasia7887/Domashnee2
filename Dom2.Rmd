@@ -1,0 +1,123 @@
+---
+title: "Domashnee2"
+author: "Kononova A.A."
+date: '10 марта 2020 г '
+output: html_document
+---
+
+```{r, echo = T, message = F, warning = F}
+# Загрузка пакетов
+library('data.table')          # работаем с объектами "таблица данных"
+library('moments')             # коэффициенты асимметрии и эксцесса 
+library('lattice')
+library('ggplot2')
+```
+В данной работе строится один и тот же график средствами «base», «lattice» и «ggplot2». Все графики строятся на данных по импорту сливочного масла в РФ. Нас интересует эффект от введения продовольственных санкций.   
+Построим коробчатые диаграммы суммарной массы поставок (пропуски, заменённые на средние, Netweight.kg.mean) по годам. Цветом показаны две группы странпоставщиков: 1) страны, попавшие под действие продовольственного эмбарго в 2014 году; 2) остальные страны.   
+Загрузим данные.
+```{r, echo = T, message = F, warning = F}
+# загружаем файл с данными по импорту масла в РФ (из прошлой практики)
+fileURL <- 'https://raw.githubusercontent.com/aksyuk/R-data/master/COMTRADE/040510-Imp-RF-comtrade.csv'
+# создаём директорию для данных, если она ещё не существует:
+if (!file.exists('./data')) {
+  dir.create('./data')
+}
+# создаём файл с логом загрузок, если он ещё не существует:
+if (!file.exists('./data/download.log')) {
+  file.create('./data/download.log')
+}
+# загружаем файл, если он ещё не существует,
+#  и делаем запись о загрузке в лог:
+if (!file.exists('./data/040510-Imp-RF-comtrade.csv')) {
+  download.file(fileURL, './data/040510-Imp-RF-comtrade.csv')
+  # сделать запись в лог
+  write(paste('Файл "040510-Imp-RF-comtrade.csv" загружен', Sys.time()), 
+        file = './data/download.log', append = T)
+}
+# читаем данные из загруженного .csv во фрейм, если он ещё не существует
+if (!exists('DT.import')){
+  DT.import <- data.table(read.csv('./data/040510-Imp-RF-comtrade.csv', 
+                                   stringsAsFactors = F))
+}
+# предварительный просмотр
+dim(DT.import)            # размерность таблицы
+str(DT.import)            # структура (характеристики столбцов)
+DT.import          # удобный просмотр объекта data.table
+
+```
+Для дальнейшей работы заменим пропуски на средние значения.
+```{r, echo = T, message = F, warning = F}
+# явное преобразование типа, чтобы избежать проблем 
+#  при заполнении пропусков
+DT.import[, Netweight.kg := as.double(Netweight.kg)]
+
+# заменяем пропуски на средние
+DT.import[, Netweight.kg.mean := round(mean(.SD$Netweight.kg,
+                                            na.rm = T), 0), by = Year]
+DT.import[!is.na(Netweight.kg), Netweight.kg.mean := Netweight.kg]
+
+# смотрим результат
+DT.import[, Netweight.kg, Netweight.kg.mean]
+DT.import[is.na(Netweight.kg), Year, Netweight.kg.mean]
+```
+Так же создадим дополнительный столбец, чтобы разделить страны на группы.
+```{r, echo = T, message = F, warning = F}
+f.report <- DT.import$Reporter
+head(f.report)
+str(f.report)
+a <- "United States of America"
+b <- "EU-28"
+for (i in 1:length(f.report)){
+  if(setequal(f.report[i],a) )
+    {
+      f.report[i] <- 1
+    }
+  else if(setequal(f.report[i],b)){
+    f.report[i] <- 1
+  }
+  else{
+    f.report[i] <- 0
+    }
+}
+head(f.report)
+DT.import[, f.report := as.double(f.report)]
+```
+Построим первый график средствами пакета base и сохраним его в формате .png.
+```{r, echo = T, message = F, warning = F}
+png('Pic-01.png', width = 500, height = 500)
+boxplot(DT.import$Netweight.kg ~ as.factor(DT.import$Year), 
+        boxwex = 0.25, at = 1:10 - 0.2,
+        subset = f.report == 0, col = "yellow",
+        xlab = 'Год', 
+        ylab = 'Суммарная масса поставок', yaxs = "i")
+boxplot(DT.import$Netweight.kg ~ as.factor(DT.import$Year), 
+        add = TRUE,
+        boxwex = 0.25, at = 1:10 + 0.2,
+        subset = f.report == 1, col = "orange")
+dev.off()
+```
+Теперь построим график с помощью пакета lattice/
+```{r, echo = T, message = F, warning = F}
+DT.import[, Embargo := factor(f.report, levels = c(0, 1), 
+                              labels = c('Остальные страны', 
+                                         'Страны Эмбраго 2014'))]
+
+png('Pic-02.png', width = 500, height = 500)
+bwplot( Netweight.kg ~  as.factor(Year)|Embargo, data = DT.import, 
+        xlab = 'Год', 
+        ylab = 'Суммарная масса поставок')
+dev.off()
+``` 
+И наконец, построим третий график средствами пакета ggplot2.
+```{r, echo = T, message = F, warning = F}
+png('Pic-03.png', width = 500, height = 500)
+gp <- ggplot(data = DT.import, 
+             aes(x = as.factor(Year), 
+                 y = Netweight.kg, 
+                 color = Embargo))
+gp <- gp + geom_boxplot()
+gp <- gp + xlab('Год')
+gp <- gp + ylab('Суммарная масса поставок')
+gp
+dev.off()
+```
